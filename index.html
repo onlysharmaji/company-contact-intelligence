@@ -1,0 +1,73 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Company Contact Intelligence</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--ink:#181b2b;--mute:#667;--line:#e2e5ef;--acc:#3f4ce0;--ok:#0f8a5f;--bad:#c23a3a}
+:root[data-theme=dark]{--bg:#12141f;--card:#1b1e2d;--ink:#eceefb;--mute:#9aa0bd;--line:#2b2f45;--acc:#8b94ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:1100px;margin:auto;padding:24px 16px 60px}header{display:flex;justify-content:space-between;align-items:start;gap:12px}
+h1{margin:0;font-size:28px;letter-spacing:-.02em}p.sub{margin:4px 0 20px;color:var(--mute)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+.row{display:flex;gap:8px;flex-wrap:wrap}input,select{flex:1;min-width:200px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+button{padding:9px 14px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit;cursor:pointer}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff}button:disabled{opacity:.5}button:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:10px}.bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .3s}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.stats div{border:1px solid var(--line);border-radius:8px;padding:10px}.stats b{display:block;font-size:22px}.stats span{color:var(--mute);font-size:13px}
+.tw{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--mute);font-weight:600}
+.badge{padding:2px 8px;border-radius:99px;background:var(--line);font-size:12px;white-space:nowrap}.High{color:var(--ok)}.Low{color:var(--bad)}
+td button{padding:3px 8px;font-size:12px;margin:0 2px 2px 0}#toast{position:fixed;right:16px;bottom:16px;display:grid;gap:8px}#toast div{background:var(--ink);color:var(--bg);padding:10px 14px;border-radius:8px}
+.hidden{display:none}
+</style></head><body><main>
+<header><div><h1>Company Contact Intelligence</h1><p class="sub">Find publicly available professional company contacts and organize them automatically.</p></div><button id="theme" aria-label="Toggle dark mode">Dark / light</button></header>
+<section class="card"><div class="row"><input id="url" placeholder="https://example.com" aria-label="Company Website URL"><button class="primary" id="go">Analyze Company</button></div>
+<div id="prog" class="hidden"><div id="plabel" style="margin-top:10px"></div><div class="bar"><i id="pbar"></i></div></div></section>
+<section id="res" class="hidden">
+<div class="card"><div class="stats" id="stats"></div></div>
+<div class="card"><div class="row" style="margin-bottom:10px"><input id="q" placeholder="Search name, email, designation"><select id="dept"><option value="">All departments</option></select></div>
+<div class="tw"><table><thead><tr><th>Name</th><th>Designation</th><th>Department</th><th>Email</th><th>Phone</th><th>Source</th><th>Confidence</th><th>Status</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+<div class="row" style="margin-top:12px"><button class="primary" id="save">Save Verified Contacts to Google Sheets</button><button id="sheet" class="hidden">Open Google Sheet</button><button id="csv">Download CSV</button><button id="json">Download JSON</button></div></div></section>
+<section class="card"><b>History</b><div class="tw"><table><thead><tr><th>Date</th><th>Company</th><th>Website</th><th>Contacts</th><th>Status</th><th></th></tr></thead><tbody id="hist"></tbody></table></div></section>
+</main><div id="toast" role="status"></div>
+<script>
+const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const SHEET='https://docs.google.com/spreadsheets/d/1q6ULjaqXip2SGcQ4xM8Qubp-54_iIhXcDWv8SAfrcOg/edit';
+let data=null;const toast=m=>{const d=document.createElement('div');d.textContent=m;$('#toast').append(d);setTimeout(()=>d.remove(),4500)};
+$('#theme').onclick=()=>{const r=document.documentElement;r.dataset.theme=r.dataset.theme==='dark'?'':'dark'};
+const hist=()=>JSON.parse(localStorage.getItem('cci-hist')||'[]');
+function renderHist(){$('#hist').innerHTML=hist().map((h,i)=>`<tr><td>${esc(h.date)}</td><td>${esc(h.data.companyName)}</td><td>${esc(h.data.website)}</td><td>${h.data.contacts.length}</td><td>Completed</td><td><button data-i="${i}">Open</button></td></tr>`).join('')||'<tr><td colspan=6>No analyses yet.</td></tr>'}
+$('#hist').onclick=e=>{const i=e.target.dataset.i;if(i!=null){data=hist()[i].data;render()}};
+$('#go').onclick=async()=>{
+  $('#go').disabled=true;$('#prog').classList.remove('hidden');$('#res').classList.add('hidden');
+  try{const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({website:$('#url').value})});
+    const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
+    while(true){const{done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop();
+      for(const l of lines.filter(Boolean)){const m=JSON.parse(l);
+        if(m.type==='progress'){$('#plabel').textContent=m.label;$('#pbar').style.width=m.pct+'%'}
+        else if(m.type==='error')toast(m.message);
+        else{data=m;$('#pbar').style.width='100%';render();const h=hist();h.unshift({date:new Date().toLocaleString(),data:m});localStorage.setItem('cci-hist',JSON.stringify(h.slice(0,10)));renderHist()}}}
+  }catch{toast('Unable to access this website. Please check the URL or try again later.')}
+  $('#go').disabled=false};
+function render(){$('#res').classList.remove('hidden');const c=data.contacts,n=d=>c.filter(x=>x.department===d).length;
+  $('#stats').innerHTML=[['Company',data.companyName],['Pages Analyzed',data.pagesAnalyzed],['Contacts Found',c.length],['HR Contacts',n('HR')],['Management Contacts',n('Management')],['Technical Support',n('Technical Support')+n('IT Support')],['Other Contacts',c.filter(x=>!['HR','Management','Technical Support','IT Support'].includes(x.department)).length]].map(([k,v])=>`<div><b>${esc(v)}</b><span>${k}</span></div>`).join('');
+  $('#dept').innerHTML='<option value="">All departments</option>'+[...new Set(c.map(x=>x.department))].map(d=>`<option>${esc(d)}</option>`).join('');rows()}
+function rows(){const q=$('#q').value.toLowerCase(),d=$('#dept').value;
+  $('#rows').innerHTML=data.contacts.map((c,i)=>({c,i})).filter(({c})=>(!d||c.department===d)&&(!q||JSON.stringify(c).toLowerCase().includes(q))).map(({c,i})=>
+  `<tr><td>${esc(c.name||'—')}</td><td>${esc(c.designation||'—')}</td><td><span class="badge">${esc(c.department)}</span></td><td>${esc(c.email)}</td><td>${esc(c.phone)}</td><td><a href="${esc(c.sourceUrl)}" target="_blank" rel="noopener">View Source</a></td><td class="${c.confidence}">${c.confidence}</td><td>${esc(c.status)}</td>
+  <td><button data-a="verify" data-i="${i}">Verify</button><button data-a="edit" data-i="${i}">Edit</button><button data-a="rm" data-i="${i}">Remove</button></td></tr>`).join('')}
+$('#q').oninput=$('#dept').onchange=rows;
+$('#rows').onclick=e=>{const{a,i}=e.target.dataset;if(!a)return;const c=data.contacts[i];
+  if(a==='rm')data.contacts.splice(i,1);
+  if(a==='verify'){c.status='Verified from Official Website';c.confidence='High'}
+  if(a==='edit'){const n=prompt('Name',c.name);if(n!==null)c.name=n;const t=prompt('Designation',c.designation);if(t!==null)c.designation=t;c.status='Needs Manual Verification'}
+  render()};
+$('#save').onclick=async()=>{const post=(u)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contacts:data.contacts})}).then(r=>r.json());
+  const p=await post('/api/check-duplicates');if(p.error)return toast(p.error);
+  if(!confirm(`Total Records: ${p.total}\nNew Records: ${p.new}\nDuplicates: ${p.duplicates}\n\nSave the new records?`))return;
+  const r=await post('/api/save-to-sheet');if(!r.success)return toast(r.error);
+  toast(`${r.saved} contacts successfully saved to Google Sheets.${r.duplicates?' Duplicate contact skipped: '+r.duplicates:''}`);$('#sheet').classList.remove('hidden')};
+$('#sheet').onclick=()=>open(SHEET,'_blank');
+const dl=(name,type,body)=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([body],{type}));a.download=name;a.click()};
+$('#json').onclick=()=>dl('contacts.json','application/json',JSON.stringify(data.contacts,null,2));
+$('#csv').onclick=()=>{const k=['companyName','name','designation','department','email','phone','linkedin','sourceUrl','contactType','confidence','status'];
+  dl('contacts.csv','text/csv',[k.join(','),...data.contacts.map(c=>k.map(f=>`"${String(c[f]??'').replace(/"/g,'""')}"`).join(','))].join('\n'))};
+renderHist();
+</script></body></html>
