@@ -1,2 +1,0 @@
-{ "name": "company-contact-intelligence", "version": "1.0.0", "private": true,
-  "scripts": { "install:all": "npm --prefix backend install", "start": "npm --prefix backend start", "dev": "npm --prefix backend run dev" } }
